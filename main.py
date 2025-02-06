@@ -1,7 +1,7 @@
 import json
 import os
 import functools
-from astrbot.api.all import *  # 包含所有必要的 API，包括 permission_type 装饰器
+from astrbot.api.all import *
 
 # 默认数据文件路径
 DEFAULT_DATA_FILE = "permissions.json"
@@ -160,9 +160,9 @@ class MyPlugin(Star):
     
     # 管理员专用指令：通过内置的 @permission_type 修饰（假设该修饰器在包装时设置 __admin_only__ = True），
     # 动态权限检查装饰器检测到后将直接调用，不做持久化权限检查。
+    @permission_type(PermissionType.ADMIN)
     @command("create_role")
-    @dynamic_permission_required("create_role")
-    @permission_type(PermissionType.ADMIN)   # 使用内置修饰器，参数仅作标记，不在代码中直接调用任何函数
+    @dynamic_permission_required("create_role")    # 使用内置修饰器，参数仅作标记，不在代码中直接调用任何函数
     async def create_role(self, event: AstrMessageEvent, role_name: str, level: int, *, description: str = ""):
         '''
         创建新角色命令，仅允许内置 ADMIN 用户调用。
@@ -177,9 +177,9 @@ class MyPlugin(Star):
         else:
             yield event.plain_result(f"角色 '{role_name}' 已存在！")
     
+    @permission_type(PermissionType.ADMIN)
     @command("set_role")
     @dynamic_permission_required("set_role")
-    @permission_type(PermissionType.ADMIN)
     async def set_role(self, event: AstrMessageEvent, user_id: str, role_name: str):
         '''
         为指定用户设置角色命令，仅允许内置 ADMIN 用户调用。
@@ -202,9 +202,9 @@ class MyPlugin(Star):
         else:
             yield event.plain_result(f"角色 '{role_name}' 不存在！")
     
+    @permission_type(PermissionType.ADMIN)
     @command("set_cmd_perm")
     @dynamic_permission_required("set_cmd_perm")
-    @permission_type(PermissionType.ADMIN)
     async def set_cmd_perm(self, event: AstrMessageEvent, command_name: str, required_level: int):
         '''
         设置指定指令最低权限要求命令，仅允许内置 ADMIN 用户调用。
