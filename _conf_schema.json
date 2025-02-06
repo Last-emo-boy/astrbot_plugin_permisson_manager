@@ -1,0 +1,27 @@
+{
+    "enable_log": {
+        "description": "是否启用权限管理的日志记录",
+        "type": "boolean",
+        "hint": "启用后，权限操作将打印日志信息，便于调试",
+        "default": true
+    },
+    "data_file": {
+        "description": "权限数据持久化存储文件路径",
+        "type": "string",
+        "hint": "存储权限、角色和指令权限数据的 JSON 文件路径",
+        "default": "permissions.json"
+    },
+    "default_role": {
+        "description": "默认角色名称",
+        "type": "string",
+        "hint": "未设置角色的用户默认分配的角色名称",
+        "default": "default",
+        "obvious_hint": true
+    },
+    "admin_role": {
+        "description": "管理员角色名称",
+        "type": "string",
+        "hint": "用于标识管理员的角色名称",
+        "default": "admin"
+    }
+}
