@@ -162,7 +162,7 @@ class MyPlugin(Star):
     # 动态权限检查装饰器检测到后将直接调用，不做持久化权限检查。
     @command("create_role")
     @dynamic_permission_required("create_role")
-    @permission_type("ADMIN")  # 使用内置修饰器，参数仅作标记，不在代码中直接调用任何函数
+    @permission_type(PermissionType.ADMIN)   # 使用内置修饰器，参数仅作标记，不在代码中直接调用任何函数
     async def create_role(self, event: AstrMessageEvent, role_name: str, level: int, *, description: str = ""):
         '''
         创建新角色命令，仅允许内置 ADMIN 用户调用。
@@ -179,7 +179,7 @@ class MyPlugin(Star):
     
     @command("set_role")
     @dynamic_permission_required("set_role")
-    @permission_type("ADMIN")
+    @permission_type(PermissionType.ADMIN)
     async def set_role(self, event: AstrMessageEvent, user_id: str, role_name: str):
         '''
         为指定用户设置角色命令，仅允许内置 ADMIN 用户调用。
@@ -204,7 +204,7 @@ class MyPlugin(Star):
     
     @command("set_cmd_perm")
     @dynamic_permission_required("set_cmd_perm")
-    @permission_type("ADMIN")
+    @permission_type(PermissionType.ADMIN)
     async def set_cmd_perm(self, event: AstrMessageEvent, command_name: str, required_level: int):
         '''
         设置指定指令最低权限要求命令，仅允许内置 ADMIN 用户调用。
