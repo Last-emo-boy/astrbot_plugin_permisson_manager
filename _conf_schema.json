@@ -24,10 +24,10 @@
         "hint": "用于标识管理员的角色名称",
         "default": "admin"
     },
-    "admin_users": {
-        "description": "管理员用户 ID 列表",
-        "type": "list",
-        "hint": "填写管理员的用户 ID 列表，例如 [\"10001\", \"10002\"]",
-        "default": []
+    "admin_user": {
+        "description": "管理员用户 ID",
+        "type": "string",
+        "hint": "填写管理员的用户 ID",
+        "default": ""
     }
 }
