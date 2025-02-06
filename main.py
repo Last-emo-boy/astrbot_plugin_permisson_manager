@@ -53,6 +53,9 @@ class PermissionManager:
             self.data["command_permissions"]["my_level"] = 0
             self.data["command_permissions"]["list_roles"] = 0
             self.data["command_permissions"]["list_cmd_perm"] = 0
+            self.data["command_permissions"]["echo"] = 0
+            self.data["command_permissions"]["add"] = 0
+            self.data["command_permissions"]["sub"] = 0
             self.save()
     
     def save(self):
@@ -106,15 +109,29 @@ class PermissionManager:
         self._log(f"指令 '{command_name}' 的权限要求为 {level} 级")
         return level
 
-def dynamic_permission_required(command_name):
+def dynamic_permission_required(command_name, require_admin=False):
     """
     动态权限检查装饰器：
-      - 根据持久化数据判断调用者的角色等级是否大于或等于该命令设置的最低权限要求。
+      - 如果 require_admin 为 True，则只允许配置中定义的管理员用户调用；
+      - 否则：如果调用者在管理员列表中，则直接放行（管理员不受持久化角色限制）；
+              否则比较调用者的持久化角色等级是否大于或等于该命令设置的最低权限要求。
     """
     def decorator(func):
         @functools.wraps(func)
         async def wrapper(self, event: AstrMessageEvent, *args, **kwargs):
-            user_level = self.permission_manager.get_user_level(event.get_sender_id())
+            sender = event.get_sender_id()
+            # 判断是否为管理员：管理员列表从插件配置中读取
+            if sender in self.admin_users:
+                async for message in func(self, event, *args, **kwargs):
+                    yield message
+                return
+            # 若要求管理员才能调用，但调用者不在管理员列表中，则直接拒绝
+            if require_admin:
+                yield event.plain_result("抱歉，该指令仅限管理员调用！")
+                event.stop_event()
+                return
+            # 普通命令：比较持久化角色等级
+            user_level = self.permission_manager.get_user_level(sender)
             required_level = self.permission_manager.get_command_permission(command_name)
             if user_level >= required_level:
                 async for message in func(self, event, *args, **kwargs):
@@ -128,33 +145,36 @@ def dynamic_permission_required(command_name):
     return decorator
 
 @register("permission_plugin", "Your Name", 
-          "分级权限管理系统插件（支持持久化、角色管理；运行命令时满足“持久化角色等级大于命令设置”或命令使用内置 @permission_type 修饰均可）", 
+          "分级权限管理系统插件（支持持久化、角色管理；管理员列表从配置中读取admin_users，管理员不受权限限制；所有指令优先级极高）", 
           "1.0.0", "repo url")
 class MyPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         """
         初始化插件，同时加载配置：
-          - config: 插件配置字典，由 _conf_schema.json 生成，包含 enable_log、data_file 等配置项
+          - config: 插件配置字典，由 _conf_schema.json 生成，
+                    包含 enable_log、data_file、admin_users 等配置项
         """
         super().__init__(context)
         data_file = config.get("data_file", DEFAULT_DATA_FILE) if config else DEFAULT_DATA_FILE
         enable_log = config.get("enable_log", True) if config else True
+        # 从配置中读取管理员用户列表，格式为列表，例如 ["10001", "10002"]
+        self.admin_users = config.get("admin_users", [])
         self.permission_manager = PermissionManager(data_file=data_file, enable_log=enable_log)
     
     # 普通指令：使用动态权限检查，根据持久化角色判断是否允许调用
-    @command("helloworld")
+    @command("helloworld", priority=9999)
     @dynamic_permission_required("helloworld")
     async def helloworld(self, event: AstrMessageEvent):
         '''hello world 指令示例。'''
         user_name = event.get_sender_name()
         yield event.plain_result(f"Hello, {user_name}!")
     
-    # 管理员专用指令：仅使用内置的 @permission_type 修饰器来判断管理员权限
-    @permission_type(PermissionType.ADMIN)
-    @command("create_role")
+    # 管理员专用指令：require_admin=True 强制要求调用者在 admin_users 列表中
+    @command("create_role", priority=9999)
+    @dynamic_permission_required("create_role", require_admin=True)
     async def create_role(self, event: AstrMessageEvent, role_name: str, level: int, *, description: str = ""):
         '''
-        创建新角色命令，仅允许内置 ADMIN 用户调用。
+        创建新角色命令，仅限管理员调用。
         
         Args:
             role_name(string): 角色名称
@@ -166,11 +186,11 @@ class MyPlugin(Star):
         else:
             yield event.plain_result(f"角色 '{role_name}' 已存在！")
     
-    @permission_type(PermissionType.ADMIN)
-    @command("set_role")
+    @command("set_role", priority=9999)
+    @dynamic_permission_required("set_role", require_admin=True)
     async def set_role(self, event: AstrMessageEvent, user_id: str, role_name: str):
         '''
-        为指定用户设置角色命令，仅允许内置 ADMIN 用户调用。
+        为指定用户设置角色命令，仅限管理员调用。
         
         Args:
             user_id(string): 用户 ID
@@ -190,11 +210,11 @@ class MyPlugin(Star):
         else:
             yield event.plain_result(f"角色 '{role_name}' 不存在！")
     
-    @permission_type(PermissionType.ADMIN)
-    @command("set_cmd_perm")
+    @command("set_cmd_perm", priority=9999)
+    @dynamic_permission_required("set_cmd_perm", require_admin=True)
     async def set_cmd_perm(self, event: AstrMessageEvent, command_name: str, required_level: int):
         '''
-        设置指定指令最低权限要求命令，仅允许内置 ADMIN 用户调用。
+        设置指定指令最低权限要求命令，仅限管理员调用。
         
         Args:
             command_name(string): 指令名称
@@ -203,15 +223,16 @@ class MyPlugin(Star):
         self.permission_manager.set_command_permission(command_name, required_level)
         yield event.plain_result(f"指令 '{command_name}' 的权限要求已设置为 {required_level} 级。")
     
-    # 查询自己当前权限等级（普通用户）——使用动态权限检查
-    @command("my_level")
+    # 查询自己当前权限等级（普通用户）
+    @command("my_level", priority=9999)
     @dynamic_permission_required("my_level")
     async def my_level(self, event: AstrMessageEvent):
         '''查询自己当前权限等级的命令。'''
         user_level = self.permission_manager.get_user_level(event.get_sender_id())
         yield event.plain_result(f"你的权限等级是 {user_level}。")
     
-    @command("list_roles")
+    # 列出所有角色及其权限信息
+    @command("list_roles", priority=9999)
     @dynamic_permission_required("list_roles")
     async def list_roles(self, event: AstrMessageEvent):
         '''列出所有角色及其权限信息的命令。'''
@@ -221,7 +242,8 @@ class MyPlugin(Star):
             lines.append(f"{role}: 等级 {info['level']} - {info.get('description', '')}")
         yield event.plain_result("\n".join(lines))
     
-    @command("list_cmd_perm")
+    # 列出所有指令权限要求
+    @command("list_cmd_perm", priority=9999)
     @dynamic_permission_required("list_cmd_perm")
     async def list_cmd_perm(self, event: AstrMessageEvent):
         '''列出所有指令权限要求的命令。'''
@@ -230,3 +252,11 @@ class MyPlugin(Star):
         for cmd, level in cmd_perms.items():
             lines.append(f"{cmd}: 需要 {level} 级")
         yield event.plain_result("\n".join(lines))
+    
+    @command("list_admins", priority=9999)
+    async def list_admins(self, event: AstrMessageEvent):
+        '''列出管理员用户（从配置中读取）。'''
+        if self.admin_users:
+            yield event.plain_result("管理员列表：" + ", ".join(self.admin_users))
+        else:
+            yield event.plain_result("管理员列表为空。")
