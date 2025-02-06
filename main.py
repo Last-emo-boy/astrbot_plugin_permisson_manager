@@ -109,31 +109,22 @@ class PermissionManager:
 def dynamic_permission_required(command_name):
     """
     动态权限检查装饰器：
-      - 如果被修饰的函数已经使用内置的 @permission_type 修饰（假设该修饰器会为函数设置属性 __admin_only__ 为 True），
-        则直接调用，不做持久化权限检查；
-      - 否则要求调用者的持久化角色等级大于或等于该命令设置的最低权限要求。
+      - 根据持久化数据判断调用者的角色等级是否大于或等于该命令设置的最低权限要求。
     """
     def decorator(func):
-        if getattr(func, "__admin_only__", False):
-            @functools.wraps(func)
-            async def wrapper(self, event: AstrMessageEvent, *args, **kwargs):
+        @functools.wraps(func)
+        async def wrapper(self, event: AstrMessageEvent, *args, **kwargs):
+            user_level = self.permission_manager.get_user_level(event.get_sender_id())
+            required_level = self.permission_manager.get_command_permission(command_name)
+            if user_level >= required_level:
                 async for message in func(self, event, *args, **kwargs):
                     yield message
-            return wrapper
-        else:
-            @functools.wraps(func)
-            async def wrapper(self, event: AstrMessageEvent, *args, **kwargs):
-                user_level = self.permission_manager.get_user_level(event.get_sender_id())
-                required_level = self.permission_manager.get_command_permission(command_name)
-                if user_level >= required_level:
-                    async for message in func(self, event, *args, **kwargs):
-                        yield message
-                else:
-                    yield event.plain_result(
-                        f"抱歉，权限不足。指令 '{command_name}' 需要权限 {required_level} 级，而你只有 {user_level} 级。"
-                    )
-                    event.stop_event()
-            return wrapper
+            else:
+                yield event.plain_result(
+                    f"抱歉，权限不足。指令 '{command_name}' 需要权限 {required_level} 级，而你只有 {user_level} 级。"
+                )
+                event.stop_event()
+        return wrapper
     return decorator
 
 @register("permission_plugin", "Your Name", 
@@ -150,7 +141,7 @@ class MyPlugin(Star):
         enable_log = config.get("enable_log", True) if config else True
         self.permission_manager = PermissionManager(data_file=data_file, enable_log=enable_log)
     
-    # 普通指令：只使用动态权限检查，依赖持久化角色数据
+    # 普通指令：使用动态权限检查，根据持久化角色判断是否允许调用
     @command("helloworld")
     @dynamic_permission_required("helloworld")
     async def helloworld(self, event: AstrMessageEvent):
@@ -158,11 +149,9 @@ class MyPlugin(Star):
         user_name = event.get_sender_name()
         yield event.plain_result(f"Hello, {user_name}!")
     
-    # 管理员专用指令：通过内置的 @permission_type 修饰（假设该修饰器在包装时设置 __admin_only__ = True），
-    # 动态权限检查装饰器检测到后将直接调用，不做持久化权限检查。
+    # 管理员专用指令：仅使用内置的 @permission_type 修饰器来判断管理员权限
     @permission_type(PermissionType.ADMIN)
     @command("create_role")
-    @dynamic_permission_required("create_role")    # 使用内置修饰器，参数仅作标记，不在代码中直接调用任何函数
     async def create_role(self, event: AstrMessageEvent, role_name: str, level: int, *, description: str = ""):
         '''
         创建新角色命令，仅允许内置 ADMIN 用户调用。
@@ -179,7 +168,6 @@ class MyPlugin(Star):
     
     @permission_type(PermissionType.ADMIN)
     @command("set_role")
-    @dynamic_permission_required("set_role")
     async def set_role(self, event: AstrMessageEvent, user_id: str, role_name: str):
         '''
         为指定用户设置角色命令，仅允许内置 ADMIN 用户调用。
@@ -204,7 +192,6 @@ class MyPlugin(Star):
     
     @permission_type(PermissionType.ADMIN)
     @command("set_cmd_perm")
-    @dynamic_permission_required("set_cmd_perm")
     async def set_cmd_perm(self, event: AstrMessageEvent, command_name: str, required_level: int):
         '''
         设置指定指令最低权限要求命令，仅允许内置 ADMIN 用户调用。
@@ -216,7 +203,7 @@ class MyPlugin(Star):
         self.permission_manager.set_command_permission(command_name, required_level)
         yield event.plain_result(f"指令 '{command_name}' 的权限要求已设置为 {required_level} 级。")
     
-    # 查询自己当前权限等级（普通用户）
+    # 查询自己当前权限等级（普通用户）——使用动态权限检查
     @command("my_level")
     @dynamic_permission_required("my_level")
     async def my_level(self, event: AstrMessageEvent):
