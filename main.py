@@ -2,6 +2,7 @@ import json
 import os
 import functools
 from astrbot.api.all import *
+from astrbot.api.event import PermissionType  # 引入内置的权限枚举
 
 # 配置文件中可配置的默认数据
 DEFAULT_DATA_FILE = "permissions.json"
@@ -109,12 +110,22 @@ class PermissionManager:
 def dynamic_permission_required(command_name):
     """
     动态权限检查装饰器：
-    检查调用者的权限是否大于等于该指令的最低要求。
-    此装饰器仅用于对具体命令进行二次校验（全局权限过滤器已优先检查）。
+    如果调用者满足内置的 ADMIN 权限（即使用 @permission_type(PermissionType.ADMIN) 判定通过），则绕过所有限制；
+    否则要求调用者的持久化角色等级大于或等于该命令的最低权限要求。
     """
     def decorator(func):
         @functools.wraps(func)
         async def wrapper(self, event: AstrMessageEvent, *args, **kwargs):
+            # 先判断是否为内置管理员，假设 event.has_permission(PermissionType.ADMIN) 能返回 True
+            try:
+                if event.has_permission(PermissionType.ADMIN):
+                    async for message in func(self, event, *args, **kwargs):
+                        yield message
+                    return
+            except Exception:
+                # 若没有此方法，则直接走后续的持久化权限判断
+                pass
+
             user_level = self.permission_manager.get_user_level(event.get_sender_id())
             required_level = self.permission_manager.get_command_permission(command_name)
             if user_level >= required_level:
@@ -128,15 +139,15 @@ def dynamic_permission_required(command_name):
         return wrapper
     return decorator
 
-@register("permission_plugin", "Your Name", "分级权限管理系统插件（支持持久化、角色管理及指令权限设置，全局优先检查权限）", "1.0.0", "repo url")
+@register("permission_plugin", "Your Name", "分级权限管理系统插件（支持持久化、角色管理、内置管理员绕过权限及指令权限设置，全局优先检查权限）", "1.0.0", "repo url")
 class MyPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         """
         初始化插件，同时加载配置：
-            - config: 插件配置字典，可从 _conf_schema.json 生成，包含 enable_log, data_file 等配置项
+          - config: 插件配置字典，可由 _conf_schema.json 生成，包含 enable_log、data_file 等配置项
         """
         super().__init__(context)
-        # 通过配置可以覆盖默认数据文件路径和日志开关
+        # 通过配置覆盖默认数据文件路径和日志开关
         data_file = config.get("data_file", DEFAULT_DATA_FILE) if config else DEFAULT_DATA_FILE
         enable_log = config.get("enable_log", True) if config else True
         self.permission_manager = PermissionManager(data_file=data_file, enable_log=enable_log)
@@ -146,13 +157,20 @@ class MyPlugin(Star):
     async def global_permission_filter(self, event: AstrMessageEvent):
         """
         全局权限过滤：
-            - 检查所有以 "/" 开头的消息是否为命令
-            - 提取命令名称并检查调用者权限是否满足最低要求
-            - 不满足时直接回绝，并停止后续命令执行
+          - 对所有以 "/" 开头的命令进行检测
+          - 如果调用者通过内置 ADMIN 检查，则直接允许
+          - 否则检查调用者是否满足该命令的最低权限要求，不满足时直接回绝，并停止后续处理
         """
         if not event.message_str.startswith("/"):
             return  # 非命令消息直接跳过
-        
+
+        # 若内置管理员判定通过，则跳过后续检查
+        try:
+            if event.has_permission(PermissionType.ADMIN):
+                return
+        except Exception:
+            pass
+
         parts = event.message_str[1:].split()
         if not parts:
             return
@@ -176,7 +194,7 @@ class MyPlugin(Star):
     @dynamic_permission_required("create_role")
     async def create_role(self, event: AstrMessageEvent, role_name: str, level: int, *, description: str = ""):
         '''
-        创建新角色命令，仅允许权限足够的用户调用。
+        创建新角色命令，仅允许满足权限要求的用户调用。
         
         Args:
             role_name(string): 角色名称
@@ -198,11 +216,12 @@ class MyPlugin(Star):
             user_id(string): 用户 ID
             role_name(string): 角色名称
         '''
-        caller_level = self.permission_manager.get_user_level(event.get_sender_id())
-        # 检查目标用户当前权限级别，若目标权限高于或等于调用者，则不允许修改
+        caller = event.get_sender_id()
+        caller_level = self.permission_manager.get_user_level(caller)
+        # 检查目标用户当前权限级别，若目标权限高于或等于调用者，则不允许修改（除非是给自己设置）
         target_role = self.permission_manager.data["user_roles"].get(user_id, "default")
         target_level = self.permission_manager.data["roles"].get(target_role, {"level": 0})["level"]
-        if event.get_sender_id() != user_id and caller_level <= target_level:
+        if caller != user_id and caller_level <= target_level:
             yield event.plain_result("不能为权限高于或等于你级别的用户设置角色！")
             return
         
@@ -227,6 +246,13 @@ class MyPlugin(Star):
     @command("my_level")
     async def my_level(self, event: AstrMessageEvent):
         '''查询自己当前权限等级的命令。'''
+        try:
+            if event.has_permission(PermissionType.ADMIN):
+                yield event.plain_result("你是内置管理员，拥有最高权限。")
+                return
+        except Exception:
+            pass
+
         user_level = self.permission_manager.get_user_level(event.get_sender_id())
         yield event.plain_result(f"你的权限等级是 {user_level}。")
     
