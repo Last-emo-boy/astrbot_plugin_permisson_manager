@@ -1,7 +1,7 @@
 {
     "enable_log": {
         "description": "是否启用权限管理的日志记录",
-        "type": "boolean",
+        "type": "bool",
         "hint": "启用后，权限操作将打印日志信息，便于调试",
         "default": true
     },
