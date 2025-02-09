@@ -112,20 +112,20 @@ class PermissionManager:
 def dynamic_permission_required(command_name, require_admin=False):
     """
     动态权限检查装饰器：
-      - 如果 require_admin 为 True，则只允许配置中定义的管理员用户调用；
-      - 否则：如果调用者等于配置中的 admin_user，则直接放行（管理员不受持久化角色限制）；
-              否则比较调用者的持久化角色等级是否大于或等于该命令设置的最低权限要求。
+      - 如果 require_admin 为 True，则仅允许调用者等于配置中的 admin_user；
+      - 否则：若调用者等于配置中的 admin_user，则直接放行（管理员不受持久化角色限制）；
+              否则比较调用者在持久化系统中的角色等级与该命令设置的最低权限要求。
     """
     def decorator(func):
         @functools.wraps(func)
         async def wrapper(self, event: AstrMessageEvent, *args, **kwargs):
             sender = event.get_sender_id()
-            # 判断是否为管理员（仅有一个管理员）
+            # 管理员不受限制
             if sender == self.admin_user:
                 async for message in func(self, event, *args, **kwargs):
                     yield message
                 return
-            # 若要求管理员才能调用但调用者不匹配，则拒绝
+            # 若要求管理员调用但调用者不匹配，则拒绝
             if require_admin:
                 yield event.plain_result("抱歉，该指令仅限管理员调用！")
                 event.stop_event()
@@ -145,7 +145,7 @@ def dynamic_permission_required(command_name, require_admin=False):
     return decorator
 
 @register("permission_plugin", "Your Name", 
-          "分级权限管理系统插件（支持持久化、角色管理；管理员由配置 admin_user 指定，管理员不受权限限制；所有指令优先级极高）", 
+          "分级权限管理系统插件（支持持久化、角色管理；管理员由配置 admin_user 指定，管理员不受权限限制；所有指令及事件监听器优先级极高）", 
           "1.0.0", "repo url")
 class MyPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
@@ -160,6 +160,41 @@ class MyPlugin(Star):
         # 从配置中读取管理员用户ID，单个字符串，例如 "10001"
         self.admin_user = config.get("admin_user", "")
         self.permission_manager = PermissionManager(data_file=data_file, enable_log=enable_log)
+    
+    # 全局事件过滤器，拦截所有以 "/" 开头的命令，优先级极高
+    @event_message_type(EventMessageType.ALL, priority=9999)
+    async def global_rbac_filter(self, event: AstrMessageEvent):
+        """
+        全局权限过滤：
+          - 对所有以 "/" 开头的消息进行检测
+          - 如果调用者不为管理员，则比较其持久化角色等级与该命令要求
+          - 若不满足条件，则返回错误提示并停止事件传播
+        """
+        if not event.message_str.startswith("/"):
+            return  # 非命令消息不处理
+        
+        parts = event.message_str[1:].split()
+        if not parts:
+            return
+        cmd = parts[0]
+        sender = event.get_sender_id()
+        # 管理员直接放行
+        if sender == self.admin_user:
+            return
+        # 如果该命令要求管理员调用，则直接拒绝
+        admin_only_cmds = {"create_role", "set_role", "set_cmd_perm"}
+        if cmd in admin_only_cmds:
+            yield event.plain_result("抱歉，该指令仅限管理员调用！")
+            event.stop_event()
+            return
+        # 普通命令权限检查
+        user_level = self.permission_manager.get_user_level(sender)
+        required_level = self.permission_manager.get_command_permission(cmd)
+        if user_level < required_level:
+            yield event.plain_result(
+                f"抱歉，权限不足。指令 '{cmd}' 需要权限 {required_level} 级，而你只有 {user_level} 级。"
+            )
+            event.stop_event()
     
     # 普通指令：使用动态权限检查，根据持久化角色判断是否允许调用
     @command("helloworld", priority=9999)
